@@ -29,6 +29,7 @@ class Api {
       ..delete('/cuenta', _borrarCuenta);
 
     return const Pipeline()
+        .addMiddleware(_cors)
         .addMiddleware(_sinCache)
         .addMiddleware(logRequests())
         .addHandler(rutas.call);
@@ -198,6 +199,23 @@ class Api {
 
   static Response _error(int codigo, String clave, String mensaje) =>
       _json(codigo, {'error': clave, 'mensaje': mensaje});
+
+  static const _cabecerasCors = {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+    'access-control-allow-headers': 'authorization, content-type',
+    'access-control-max-age': '86400',
+  };
+
+  static Middleware get _cors => (Handler siguiente) {
+        return (Request peticion) async {
+          if (peticion.method == 'OPTIONS') {
+            return Response(204, headers: _cabecerasCors);
+          }
+          final respuesta = await siguiente(peticion);
+          return respuesta.change(headers: _cabecerasCors);
+        };
+      };
 
   static Middleware get _sinCache => (Handler siguiente) {
         return (Request peticion) async {

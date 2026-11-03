@@ -14,6 +14,22 @@ Future<void> main(List<String> argumentos) async {
 
   stdout.writeln('Servidor de cuentas en http://localhost:${servidor.port}');
   stdout.writeln('Usuarios guardados en $datos');
+
+  var cerrando = false;
+  Future<void> apagar(ProcessSignal senal) async {
+    if (cerrando) {
+      return;
+    }
+    cerrando = true;
+    stdout.writeln('Apagando el servidor...');
+    await servidor.close();
+    exit(0);
+  }
+
+  ProcessSignal.sigint.watch().listen(apagar);
+  if (!Platform.isWindows) {
+    ProcessSignal.sigterm.watch().listen(apagar);
+  }
 }
 
 String? _opcion(List<String> argumentos, String nombre) {

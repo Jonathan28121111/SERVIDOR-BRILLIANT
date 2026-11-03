@@ -109,9 +109,12 @@ class AlmacenUsuarios {
     }
     _archivo.parent.createSync(recursive: true);
     final lista = _usuarios.values.map((u) => u.aJson()).toList();
-    _archivo.writeAsStringSync(
+    final temporal = File('${_archivo.path}.tmp');
+    temporal.writeAsStringSync(
       const JsonEncoder.withIndent('  ').convert(lista),
+      flush: true,
     );
+    temporal.renameSync(_archivo.path);
   }
 }
 
