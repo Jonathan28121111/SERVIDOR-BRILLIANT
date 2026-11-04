@@ -277,4 +277,21 @@ void main() {
       expect((await json(r))['estado'], 'bien');
     });
   });
+
+  group('CORS', () {
+    test('contesta la peticion previa del navegador', () async {
+      final r = await pedir('OPTIONS', '/registro');
+
+      expect(r.statusCode, 204);
+      expect(r.headers['access-control-allow-origin'], '*');
+      expect(
+          r.headers['access-control-allow-headers'], contains('authorization'));
+    });
+
+    test('pone las cabeceras en las respuestas normales', () async {
+      final r = await pedir('GET', '/salud');
+
+      expect(r.headers['access-control-allow-origin'], '*');
+    });
+  });
 }
