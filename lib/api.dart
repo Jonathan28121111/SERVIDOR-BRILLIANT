@@ -4,6 +4,8 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import 'almacen_usuarios.dart';
+import 'juego_en_linea.dart';
+import 'salas.dart';
 import 'sesiones.dart';
 import 'usuario.dart';
 
@@ -11,13 +13,25 @@ class Api {
   final AlmacenUsuarios almacen;
   final Sesiones sesiones;
   final Freno freno;
+  final GestorSalas salas;
+  final Duration? intervaloPing;
+
+  /// Comparte las sesiones con la API: el token de /sesion sirve para jugar.
+  late final JuegoEnLinea juego = JuegoEnLinea(
+    sesiones: sesiones,
+    salas: salas,
+    intervaloPing: intervaloPing,
+  );
 
   Api({
     required this.almacen,
     Sesiones? sesiones,
     Freno? freno,
+    GestorSalas? salas,
+    this.intervaloPing = const Duration(seconds: 10),
   })  : sesiones = sesiones ?? Sesiones(),
-        freno = freno ?? Freno();
+        freno = freno ?? Freno(),
+        salas = salas ?? GestorSalas();
 
   Handler get manejador {
     final rutas = Router()
@@ -26,7 +40,8 @@ class Api {
       ..post('/sesion', _iniciarSesion)
       ..delete('/sesion', _cerrarSesion)
       ..get('/yo', _yo)
-      ..delete('/cuenta', _borrarCuenta);
+      ..delete('/cuenta', _borrarCuenta)
+      ..get('/juego', (Request peticion) => juego.manejador(peticion));
 
     return const Pipeline()
         .addMiddleware(_cors)

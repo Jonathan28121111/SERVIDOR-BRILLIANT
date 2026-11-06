@@ -1,7 +1,8 @@
-# Servidor de cuentas
+# Servidor del Juego Brilliant
 
 Servidor en Dart ([shelf](https://pub.dev/packages/shelf)) para registrar
-usuarios del juego e iniciar sesión.
+usuarios del juego, iniciar sesión y jugar partidas en línea de dos jugadores.
+La app vive en el repositorio `pruebas_numeros`.
 
 ## Arrancarlo
 
@@ -62,3 +63,62 @@ El token se manda en la cabecera `Authorization: Bearer <token>`.
 - El archivo de usuarios se escribe primero en un temporal y luego se renombra,
   para no corromperlo si el proceso se corta a mitad.
 - CORS abierto (`*`) para que la versión web del juego pueda llamar al servidor.
+
+## Partidas en línea
+
+`GET /juego` abre un **WebSocket**. Todos los mensajes son JSON con un campo
+`tipo`. El primero tiene que ser el saludo con el token de `/sesion` (va en el
+mensaje y no en la URL para que no quede en los logs):
+
+```json
+{"tipo": "hola", "token": "<token>"}
+```
+
+Sin saludo válido en 10 s, o con un token vencido, el servidor responde
+`{"tipo": "error", "error": "sin_sesion"}` y cuelga.
+
+### Del cliente al servidor
+
+| Tipo         | Campos                                                    | Cuándo |
+|--------------|-----------------------------------------------------------|--------|
+| `crear_sala` | `nivel` (1–4)                                             | En el lobby |
+| `unirse`     | `codigo`                                                  | En el lobby |
+| `empezar`    | —                                                         | Solo el anfitrión, con los dos en la sala |
+| `anclas`     | `valores`: `[[fila, columna, numero], ...]`               | Fase `anclas` |
+| `jugada`     | `ronda`, `fila`, `columna`, `numero`, `puntos`, `terminado` | Fase `juego` |
+| `pasar`      | `ronda`                                                   | Fase `juego`, sin jugada posible |
+| `rendirse`   | —                                                         | Fases `anclas` o `juego` |
+| `salir_sala` | —                                                         | En espera o con la partida terminada |
+
+### Del servidor al cliente
+
+- `bienvenida`: el saludo fue aceptado.
+- `estado`: la foto completa de la sala, **personal para cada jugador**. Se
+  manda con cada cambio: `codigo`, `nivel`, `anfitrion`, `fase`
+  (`espera`/`anclas`/`juego`/`terminada`), `ronda`, `dados`, `segundosRonda`,
+  `jugadores` (con `conectado`, `listo`, `puntos`, `jugoRonda`, `terminado`,
+  `segundosGracia`), `mias` (las casillas propias, para reconstruir el
+  tablero) y `resultado` (`ganador`, `motivo`).
+- `sin_sala`, `sala_cerrada`: ya no estás en ninguna sala.
+- `reemplazada`: se abrió el juego en otra ventana; esta conexión se cierra.
+- `error`: `{"error": "<clave>", "mensaje": "<texto>"}`.
+
+### Reglas que aplica el servidor
+
+- **Código de sala**: 6 caracteres sin los que se confunden al dictarlos
+  (0/O, 1/I/L). No distingue mayúsculas. Hay un freno de 10 códigos
+  equivocados por minuto contra la fuerza bruta.
+- **Rondas**: los dos reciben los mismos dados. La siguiente tirada sale
+  cuando ambos jugaron o pasaron. Cada ronda dura como máximo 90 s; quien no
+  juega, pasa. Quien ya terminó su tablero no frena las rondas.
+- **Desconexión**: el jugador tiene 60 s para volver. Mientras tanto el reloj
+  de la ronda se para y el rival ve la cuenta regresiva. Al volver recibe el
+  `estado` completo. Si no vuelve, el rival gana por `abandono`; si los dos se
+  caen y nadie vuelve, la partida termina en `abandonoAmbos`. Se mandan pings
+  cada 10 s para detectar conexiones muertas.
+- **Final**: gana quien tenga más puntos cuando los dos terminan (`puntos`), o
+  hay `empate`, o gana el rival de quien se rinde (`rendicion`). La sala
+  terminada se borra a los 10 minutos.
+- El servidor valida que el número salió en los dados, que la casilla no
+  estuviera ocupada y que no se juegue dos veces la misma ronda. Las reglas de
+  cada zona del tablero y el cálculo de puntos los aplica el cliente.
