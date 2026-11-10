@@ -643,4 +643,118 @@ void main() {
       expect(ana.jugadores.map((j) => j['usuario']), ['ana']);
     });
   });
+
+  group('puntos por orden de llegada', () {
+    const tabla = {
+      '1': [8, 6, 4],
+      '2': [4, 3, 2],
+    };
+
+    void enJuegoConTabla() {
+      conectarAmbos();
+      gestor
+          .recibir('ana', {'tipo': 'crear_sala', 'nivel': 1, 'puntos': tabla});
+      gestor.recibir('beto', {
+        'tipo': 'unirse',
+        'codigo': ana.estado['codigo'],
+      });
+      gestor.recibir('ana', {'tipo': 'empezar'});
+      gestor.recibir('ana', {'tipo': 'anclas', 'valores': anclasAna});
+      gestor.recibir('beto', {'tipo': 'anclas', 'valores': anclasBeto});
+    }
+
+    Map<String, Object?> completa(int ronda, List<int> zonas, {int fila = 1}) =>
+        {...jugada(ronda, fila: fila), 'zonas': zonas};
+
+    test('quien completa primero una zona se lleva el puntaje mayor', () {
+      enJuegoConTabla();
+      gestor.recibir('ana', completa(1, [1]));
+      gestor.recibir('beto', completa(1, []));
+      gestor.recibir('ana', completa(2, [1], fila: 2));
+      gestor.recibir('beto', completa(2, [1], fila: 2));
+
+      expect(ana.jugador('ana')['puntos'], 8);
+      expect(ana.jugador('beto')['puntos'], 6);
+    });
+
+    test('si la completan en la misma ronda, empatan con el mayor', () {
+      enJuegoConTabla();
+      gestor.recibir('ana', completa(1, [1]));
+      gestor.recibir('beto', completa(1, [1]));
+
+      expect(ana.jugador('ana')['puntos'], 8);
+      expect(ana.jugador('beto')['puntos'], 8);
+    });
+
+    test('volver a reportar una zona no cambia cuando se completo', () {
+      enJuegoConTabla();
+      gestor.recibir('beto', completa(1, [1]));
+      gestor.recibir('ana', completa(1, []));
+      gestor.recibir('beto', completa(2, [1], fila: 2));
+      gestor.recibir('ana', completa(2, [1], fila: 2));
+      gestor.recibir('beto', completa(3, [1, 2], fila: 3));
+      gestor.recibir('ana', completa(3, [1], fila: 3));
+
+      expect(ana.jugador('beto')['puntos'], 8 + 4);
+      expect(ana.jugador('ana')['puntos'], 6);
+    });
+
+    test('una zona completada con las anclas cuenta desde antes de jugar', () {
+      conectarAmbos();
+      gestor
+          .recibir('ana', {'tipo': 'crear_sala', 'nivel': 1, 'puntos': tabla});
+      gestor.recibir('beto', {
+        'tipo': 'unirse',
+        'codigo': ana.estado['codigo'],
+      });
+      gestor.recibir('ana', {'tipo': 'empezar'});
+      gestor.recibir('ana', {
+        'tipo': 'anclas',
+        'valores': anclasAna,
+        'zonas': [2],
+      });
+      gestor.recibir('beto', {'tipo': 'anclas', 'valores': anclasBeto});
+      gestor.recibir('beto', completa(1, [2]));
+
+      expect(beto.jugador('ana')['puntos'], 4);
+      expect(beto.jugador('beto')['puntos'], 3);
+    });
+
+    test('el ganador se decide con los puntos del servidor', () {
+      enJuegoConTabla();
+      // Los dos reportan 99 puntos, pero ana llegó primero a la zona 1.
+      gestor.recibir('ana', {
+        ...completa(1, [1]),
+        'puntos': 99,
+        'terminado': true,
+      });
+      gestor.recibir('beto', {...completa(1, []), 'puntos': 99});
+      gestor.recibir('beto', {
+        ...completa(2, [1], fila: 2),
+        'puntos': 99,
+        'terminado': true,
+      });
+
+      expect(ana.estado['resultado'], {'ganador': 'ana', 'motivo': 'puntos'});
+    });
+
+    test('una zona que no esta en la tabla se rechaza', () {
+      enJuegoConTabla();
+      gestor.recibir('ana', completa(1, [77]));
+
+      expect(ana.ultimoError?['error'], 'jugada_invalida');
+    });
+
+    test('una tabla mal formada no crea la sala', () {
+      gestor.conectar('ana', ana);
+      gestor.recibir('ana', {
+        'tipo': 'crear_sala',
+        'nivel': 1,
+        'puntos': {'1': 'ocho'},
+      });
+
+      expect(ana.ultimoError?['error'], 'puntos_invalidos');
+      expect(gestor.cuantasSalas, 0);
+    });
+  });
 }
