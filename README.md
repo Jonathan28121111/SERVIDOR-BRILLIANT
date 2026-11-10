@@ -81,11 +81,11 @@ Sin saludo válido en 10 s, o con un token vencido, el servidor responde
 
 | Tipo         | Campos                                                    | Cuándo |
 |--------------|-----------------------------------------------------------|--------|
-| `crear_sala` | `nivel` (1–4)                                             | En el lobby |
+| `crear_sala` | `nivel` (1–4), `puntos`: `{"<zona>": [8, 6, 4], ...}`     | En el lobby |
 | `unirse`     | `codigo`                                                  | En el lobby |
 | `empezar`    | —                                                         | Solo el anfitrión, con los dos en la sala |
-| `anclas`     | `valores`: `[[fila, columna, numero], ...]`               | Fase `anclas` |
-| `jugada`     | `ronda`, `fila`, `columna`, `numero`, `puntos`, `terminado` | Fase `juego` |
+| `anclas`     | `valores`: `[[fila, columna, numero], ...]`, `zonas`      | Fase `anclas` |
+| `jugada`     | `ronda`, `fila`, `columna`, `numero`, `zonas`, `terminado` | Fase `juego` |
 | `pasar`      | `ronda`                                                   | Fase `juego`, sin jugada posible |
 | `rendirse`   | —                                                         | Fases `anclas` o `juego` |
 | `salir_sala` | —                                                         | En espera o con la partida terminada |
@@ -116,9 +116,16 @@ Sin saludo válido en 10 s, o con un token vencido, el servidor responde
   `estado` completo. Si no vuelve, el rival gana por `abandono`; si los dos se
   caen y nadie vuelve, la partida termina en `abandonoAmbos`. Se mandan pings
   cada 10 s para detectar conexiones muertas.
+- **Puntos**: cada zona tiene sus puntajes en orden de llegada (p. ej. 8, 6,
+  4). Con cada jugada el cliente manda `zonas`, las zonas que tiene completas,
+  y el servidor anota en qué ronda completó cada una. Quien completa una zona
+  antes que su rival se lleva el primer puntaje y el otro, el segundo; si la
+  completan en la misma ronda, los dos se llevan el primero. Los puntos los
+  calcula el servidor.
 - **Final**: gana quien tenga más puntos cuando los dos terminan (`puntos`), o
   hay `empate`, o gana el rival de quien se rinde (`rendicion`). La sala
   terminada se borra a los 10 minutos.
 - El servidor valida que el número salió en los dados, que la casilla no
-  estuviera ocupada y que no se juegue dos veces la misma ronda. Las reglas de
-  cada zona del tablero y el cálculo de puntos los aplica el cliente.
+  estuviera ocupada, que no se juegue dos veces la misma ronda y que las zonas
+  reportadas existan. Las reglas de cada zona del tablero las aplica el
+  cliente.

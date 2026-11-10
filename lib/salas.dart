@@ -50,8 +50,14 @@ class _Jugador {
   bool listo = false;
   bool jugoRonda = false;
   bool terminado = false;
-  int puntos = 0;
+
+  /// Los puntos que calculó el cliente. Solo se usan si la sala no tiene
+  /// tabla de puntos (clientes viejos).
+  int puntosReportados = 0;
   final Map<(int, int), int> casillas = {};
+
+  /// Zona completada -> ronda en que se completó (0 = con las anclas).
+  final Map<int, int> zonas = {};
   Timer? gracia;
   DateTime? finGracia;
 
@@ -81,7 +87,11 @@ class _Sala {
   String? ganador;
   Motivo? motivo;
 
-  _Sala(this.codigo, this.nivel, this.anfitrion);
+  /// Zona -> sus puntajes en orden de llegada, p. ej. [8, 6, 4]: quien la
+  /// completa primero se lleva 8 y quien la completa después, 6.
+  final Map<int, List<int>> tablaPuntos;
+
+  _Sala(this.codigo, this.nivel, this.anfitrion, this.tablaPuntos);
 
   _Jugador? jugador(String usuario) {
     for (final j in jugadores) {
@@ -210,7 +220,7 @@ class GestorSalas {
     try {
       switch (mensaje['tipo']) {
         case 'crear_sala':
-          _crearSala(usuario, mensaje['nivel']);
+          _crearSala(usuario, mensaje['nivel'], mensaje['puntos']);
         case 'unirse':
           _unirse(usuario, mensaje['codigo']);
         case 'salir_sala':
@@ -218,7 +228,7 @@ class GestorSalas {
         case 'empezar':
           _empezar(usuario);
         case 'anclas':
-          _anclas(usuario, mensaje['valores']);
+          _anclas(usuario, mensaje);
         case 'jugada':
           _jugada(usuario, mensaje);
         case 'pasar':
@@ -240,16 +250,23 @@ class GestorSalas {
     }
   }
 
-  void _crearSala(String usuario, Object? nivel) {
+  void _crearSala(String usuario, Object? nivel, Object? puntos) {
     if (nivel is! int || nivel < nivelMinimo || nivel > nivelMaximo) {
       throw const ErrorSala('nivel_invalido', 'Ese nivel no existe.');
+    }
+    final tabla = _leerTabla(puntos);
+    if (tabla == null) {
+      throw const ErrorSala(
+        'puntos_invalidos',
+        'La tabla de puntos del tablero no es válida.',
+      );
     }
     _dejarSalaTerminada(usuario);
     if (_salaDe.containsKey(usuario.toLowerCase())) {
       throw const ErrorSala('ya_en_sala', 'Ya estás en una sala.');
     }
 
-    final sala = _Sala(_codigoNuevo(), nivel, usuario);
+    final sala = _Sala(_codigoNuevo(), nivel, usuario, tabla);
     sala.jugadores.add(_Jugador(usuario, _canales[usuario.toLowerCase()]));
     _salas[sala.codigo] = sala;
     _salaDe[usuario.toLowerCase()] = sala;
@@ -334,7 +351,8 @@ class GestorSalas {
     _difundir(sala);
   }
 
-  void _anclas(String usuario, Object? valores) {
+  void _anclas(String usuario, Map<String, Object?> mensaje) {
+    final valores = mensaje['valores'];
     final sala = _salaPropia(usuario);
     final jugador = sala.jugador(usuario)!;
     if (sala.fase != Fase.anclas) {
@@ -356,7 +374,13 @@ class GestorSalas {
       );
     }
 
+    final zonas = _leerZonas(sala, mensaje['zonas']);
+    if (zonas == null) {
+      throw const ErrorSala('anclas_invalidas', 'Las zonas no son válidas.');
+    }
+
     jugador.casillas.addAll(casillas);
+    _anotarZonas(jugador, zonas, 0);
     jugador.listo = true;
     if (sala.jugadores.every((j) => j.listo)) {
       sala.fase = Fase.juego;
@@ -394,9 +418,14 @@ class GestorSalas {
     if (jugador.casillas.containsKey((fila, columna))) {
       throw const ErrorSala('jugada_invalida', 'Esa casilla ya está ocupada.');
     }
+    final zonas = _leerZonas(sala, mensaje['zonas']);
+    if (zonas == null) {
+      throw const ErrorSala('jugada_invalida', 'Las zonas no son válidas.');
+    }
 
     jugador.casillas[(fila, columna)] = numero;
-    jugador.puntos = puntos;
+    jugador.puntosReportados = puntos;
+    _anotarZonas(jugador, zonas, sala.ronda);
     jugador.terminado = terminado;
     jugador.jugoRonda = true;
     _quizaCerrarRonda(sala);
@@ -480,10 +509,11 @@ class GestorSalas {
 
   void _terminarPorPuntos(_Sala sala) {
     final [uno, otro] = sala.jugadores;
-    if (uno.puntos == otro.puntos) {
+    final (puntosUno, puntosOtro) = (_puntos(sala, uno), _puntos(sala, otro));
+    if (puntosUno == puntosOtro) {
       _terminar(sala, null, Motivo.empate);
     } else {
-      final ganador = uno.puntos > otro.puntos ? uno : otro;
+      final ganador = puntosUno > puntosOtro ? uno : otro;
       _terminar(sala, ganador.usuario, Motivo.puntos);
     }
   }
@@ -568,6 +598,70 @@ class GestorSalas {
 
   static bool _dentro(int n) => n >= 0 && n < ladoMaximoTablero;
 
+  /// Los puntos de un jugador según el orden en que completó cada zona.
+  ///
+  /// Su puesto en una zona es cuántos rivales la completaron en una ronda
+  /// anterior: si la completan en la misma ronda, empatan y los dos se llevan
+  /// el puntaje mayor. Después del último puntaje se repite el último.
+  int _puntos(_Sala sala, _Jugador jugador) {
+    if (sala.tablaPuntos.isEmpty) return jugador.puntosReportados;
+    var total = 0;
+    jugador.zonas.forEach((zona, ronda) {
+      final valores = sala.tablaPuntos[zona];
+      if (valores == null || valores.isEmpty) return;
+      final antes = sala.jugadores
+          .where((otro) => !identical(otro, jugador))
+          .where((otro) => (otro.zonas[zona] ?? ronda) < ronda)
+          .length;
+      total += valores[min(antes, valores.length - 1)];
+    });
+    return total;
+  }
+
+  /// Anota solo las zonas nuevas: una zona completada se queda con la ronda
+  /// en que se completó la primera vez.
+  static void _anotarZonas(_Jugador jugador, Set<int> zonas, int ronda) {
+    for (final zona in zonas) {
+      jugador.zonas.putIfAbsent(zona, () => ronda);
+    }
+  }
+
+  /// La tabla `{"1": [8, 6, 4], ...}` que manda quien crea la sala. Sin
+  /// tabla queda vacía (clientes viejos); si viene mal, null.
+  static Map<int, List<int>>? _leerTabla(Object? json) {
+    if (json == null) return const {};
+    if (json is! Map || json.length > 64) return null;
+    final tabla = <int, List<int>>{};
+    for (final MapEntry(:key, :value) in json.entries) {
+      final zona = key is String ? int.tryParse(key) : null;
+      if (zona == null ||
+          value is! List ||
+          value.isEmpty ||
+          value.length > 3 ||
+          value.any((v) => v is! int || v < 0 || v > 100)) {
+        return null;
+      }
+      tabla[zona] = value.cast<int>();
+    }
+    return tabla;
+  }
+
+  /// Las zonas completas que reporta el cliente. Si la sala tiene tabla,
+  /// solo valen las zonas que están en ella.
+  static Set<int>? _leerZonas(_Sala sala, Object? json) {
+    if (json == null) return const {};
+    if (json is! List || json.length > 64) return null;
+    final zonas = <int>{};
+    for (final zona in json) {
+      if (zona is! int) return null;
+      if (sala.tablaPuntos.isNotEmpty && !sala.tablaPuntos.containsKey(zona)) {
+        return null;
+      }
+      zonas.add(zona);
+    }
+    return zonas;
+  }
+
   static Map<(int, int), int>? _leerCasillas(Object? valores) {
     if (valores is! List || valores.isEmpty || valores.length > 12) {
       return null;
@@ -642,7 +736,7 @@ class GestorSalas {
             'usuario': j.usuario,
             'conectado': j.conectado,
             'listo': j.listo,
-            'puntos': j.puntos,
+            'puntos': _puntos(sala, j),
             'jugoRonda': j.jugoRonda,
             'terminado': j.terminado,
             'segundosGracia': segundosHasta(j.finGracia),
