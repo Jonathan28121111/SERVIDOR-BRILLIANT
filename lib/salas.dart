@@ -29,12 +29,19 @@ class Ajustes {
   final int fallosDeCodigoPorMinuto;
 
   const Ajustes({
-    this.graciaReconexion = const Duration(seconds: 60),
+    this.graciaReconexion = const Duration(seconds: 10),
     this.limiteRonda = const Duration(seconds: 90),
     this.vidaSalaTerminada = const Duration(minutes: 10),
     this.fallosDeCodigoPorMinuto = 10,
   });
 }
+
+/// Los puntos con que se acaba la partida, como en la tarjeta: 26 con dos
+/// jugadores, 24 con tres, 22 con cuatro y 20 con cinco.
+int metaDePuntos(int jugadores) => 30 - 2 * jugadores;
+
+const int minimoJugadores = 2;
+const int maximoJugadores = 5;
 
 const int nivelMinimo = 1;
 const int nivelMaximo = 4;
@@ -51,6 +58,9 @@ class _Jugador {
   bool jugoRonda = false;
   bool terminado = false;
 
+  /// Se rindió o no volvió a tiempo: la partida sigue sin él.
+  bool fuera = false;
+
   /// Los puntos que calculó el cliente. Solo se usan si la sala no tiene
   /// tabla de puntos (clientes viejos).
   int puntosReportados = 0;
@@ -64,7 +74,7 @@ class _Jugador {
   _Jugador(this.usuario, this.canal);
 
   bool get conectado => canal != null;
-  bool get yaJugo => jugoRonda || terminado;
+  bool get yaJugo => jugoRonda || terminado || fuera;
 
   void cancelarGracia() {
     gracia?.cancel();
@@ -87,6 +97,9 @@ class _Sala {
   String? ganador;
   Motivo? motivo;
 
+  /// Se fija al empezar, con los jugadores que había.
+  int? meta;
+
   /// Zona -> sus puntajes en orden de llegada, p. ej. [8, 6, 4]: quien la
   /// completa primero se lleva 8 y quien la completa después, 6.
   final Map<int, List<int>> tablaPuntos;
@@ -101,6 +114,13 @@ class _Sala {
   }
 
   bool get enCurso => fase == Fase.anclas || fase == Fase.juego;
+
+  List<_Jugador> get activos => [
+        for (final j in jugadores)
+          if (!j.fuera) j,
+      ];
+
+  int get metaPuntos => meta ?? metaDePuntos(jugadores.length);
 
   void cancelarRelojes() {
     reloj?.cancel();
@@ -167,15 +187,20 @@ class GestorSalas {
       return;
     }
     final jugador = sala.jugador(usuario)!;
+    if (jugador.fuera && sala.enCurso) {
+      _salaDe.remove(llave);
+      canal.enviar({'tipo': 'sin_sala'});
+      return;
+    }
     jugador.canal = canal;
     jugador.cancelarGracia();
 
-    // Si el rival se cayó y ya se le acabó la espera mientras este jugador
-    // también estaba caído, nadie más va a decidir la partida: gana quien
-    // volvió.
-    final abandonado = sala.enCurso &&
-        sala.jugadores.any((j) => !j.conectado && j.gracia == null);
-    if (abandonado) {
+    // Si los demás se cayeron y no volvieron mientras este jugador también
+    // estaba caído, nadie más va a decidir la partida: gana quien volvió.
+    final activos = sala.activos;
+    if (sala.enCurso &&
+        activos.length == 1 &&
+        identical(activos.single, jugador)) {
       _terminar(sala, jugador.usuario, Motivo.abandono);
       return;
     }
@@ -308,7 +333,7 @@ class GestorSalas {
         'Esa partida ya empezó.',
       );
     }
-    if (sala.jugadores.length >= 2) {
+    if (sala.jugadores.length >= maximoJugadores) {
       throw const ErrorSala('sala_llena', 'Esa sala ya está llena.');
     }
 
@@ -344,9 +369,10 @@ class GestorSalas {
     if (sala.fase != Fase.espera) {
       throw const ErrorSala('partida_empezada', 'La partida ya empezó.');
     }
-    if (sala.jugadores.length < 2) {
+    if (sala.jugadores.length < minimoJugadores) {
       throw const ErrorSala('falta_rival', 'Todavía falta tu rival.');
     }
+    sala.meta = metaDePuntos(sala.jugadores.length);
     sala.fase = Fase.anclas;
     _difundir(sala);
   }
@@ -382,7 +408,7 @@ class GestorSalas {
     jugador.casillas.addAll(casillas);
     _anotarZonas(jugador, zonas, 0);
     jugador.listo = true;
-    if (sala.jugadores.every((j) => j.listo)) {
+    if (sala.activos.every((j) => j.listo)) {
       sala.fase = Fase.juego;
       _rondaNueva(sala);
     } else {
@@ -442,8 +468,42 @@ class GestorSalas {
     if (!sala.enCurso) {
       throw const ErrorSala('sin_partida', 'No hay ninguna partida en curso.');
     }
-    final rival = sala.jugadores.firstWhere((j) => !_mismo(j.usuario, usuario));
-    _terminar(sala, rival.usuario, Motivo.rendicion);
+    _dejarFuera(sala, sala.jugador(usuario)!, Motivo.rendicion);
+  }
+
+  /// Saca de la partida a quien se rindió o no volvió. Si queda uno solo,
+  /// gana; si quedan más, siguen jugando sin él.
+  void _dejarFuera(_Sala sala, _Jugador jugador, Motivo motivo) {
+    jugador.fuera = true;
+    jugador.cancelarGracia();
+    final activos = sala.activos;
+    if (activos.isEmpty) {
+      _terminar(sala, null, Motivo.abandonoAmbos);
+      return;
+    }
+    if (activos.length == 1) {
+      _terminar(sala, activos.single.usuario, motivo);
+      return;
+    }
+
+    _salaDe.remove(jugador.usuario.toLowerCase());
+    jugador.canal?.enviar({
+      'tipo': 'sala_cerrada',
+      'mensaje': motivo == Motivo.rendicion
+          ? 'Te rendiste. La partida sigue sin ti.'
+          : 'No volviste a tiempo. La partida siguió sin ti.',
+    });
+    jugador.canal = null;
+
+    _ajustarReloj(sala);
+    if (sala.fase == Fase.anclas && activos.every((j) => j.listo)) {
+      sala.fase = Fase.juego;
+      _rondaNueva(sala);
+    } else if (sala.fase == Fase.juego) {
+      _quizaCerrarRonda(sala);
+    } else {
+      _difundir(sala);
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -461,20 +521,26 @@ class GestorSalas {
     _difundir(sala);
   }
 
+  /// La meta solo se revisa al cerrar la ronda, para que todos jueguen con
+  /// los mismos dados antes de decidir.
   void _quizaCerrarRonda(_Sala sala) {
-    if (sala.jugadores.every((j) => j.terminado)) {
+    final activos = sala.activos;
+    final rondaCompleta = activos.every((j) => j.yaJugo);
+    final llegoALaMeta =
+        activos.any((j) => _puntos(sala, j) >= sala.metaPuntos);
+    if (activos.every((j) => j.terminado) || (rondaCompleta && llegoALaMeta)) {
       _terminarPorPuntos(sala);
-    } else if (sala.jugadores.every((j) => j.yaJugo)) {
+    } else if (rondaCompleta) {
       _rondaNueva(sala);
     } else {
       _difundir(sala);
     }
   }
 
-  /// El reloj de la ronda solo corre con los dos conectados: si uno se cae,
+  /// El reloj de la ronda solo corre con todos conectados: si uno se cae,
   /// se para, y vuelve a empezar completo cuando regresa.
   void _ajustarReloj(_Sala sala) {
-    final todos = sala.jugadores.every((j) => j.conectado);
+    final todos = sala.activos.every((j) => j.conectado);
     if (sala.fase != Fase.juego || !todos) {
       sala.reloj?.cancel();
       sala.reloj = null;
@@ -497,24 +563,34 @@ class GestorSalas {
   void _seAcaboLaGracia(_Sala sala, _Jugador caido) {
     caido.gracia = null;
     caido.finGracia = null;
-    if (!sala.enCurso || caido.conectado) return;
-    final rival = sala.jugadores.firstWhere((j) => !identical(j, caido));
-    if (rival.conectado) {
-      _terminar(sala, rival.usuario, Motivo.abandono);
-    } else if (rival.gracia == null) {
+    if (!sala.enCurso || caido.conectado || caido.fuera) return;
+    final otros = [
+      for (final j in sala.activos)
+        if (!identical(j, caido)) j,
+    ];
+    if (otros.any((j) => j.conectado)) {
+      _dejarFuera(sala, caido, Motivo.abandono);
+    } else if (otros.any((j) => j.gracia != null)) {
+      // Los demás también están en su espera: se decide cuando vuelvan o
+      // se les acabe a ellos.
+      caido.fuera = true;
+    } else {
       _terminar(sala, null, Motivo.abandonoAmbos);
     }
-    // Si el rival también está en su gracia, se decide cuando acabe la suya.
   }
 
   void _terminarPorPuntos(_Sala sala) {
-    final [uno, otro] = sala.jugadores;
-    final (puntosUno, puntosOtro) = (_puntos(sala, uno), _puntos(sala, otro));
-    if (puntosUno == puntosOtro) {
+    final activos = sala.activos;
+    final puntos = [for (final j in activos) _puntos(sala, j)];
+    final maximo = puntos.reduce(max);
+    final mejores = [
+      for (var i = 0; i < activos.length; i++)
+        if (puntos[i] == maximo) activos[i],
+    ];
+    if (mejores.length > 1) {
       _terminar(sala, null, Motivo.empate);
     } else {
-      final ganador = puntosUno > puntosOtro ? uno : otro;
-      _terminar(sala, ganador.usuario, Motivo.puntos);
+      _terminar(sala, mejores.single.usuario, Motivo.puntos);
     }
   }
 
@@ -730,6 +806,8 @@ class GestorSalas {
         null => null,
       },
       'segundosRonda': segundosHasta(sala.finRonda),
+      'metaPuntos': sala.metaPuntos,
+      'maximoJugadores': maximoJugadores,
       'jugadores': [
         for (final j in sala.jugadores)
           {
@@ -739,6 +817,11 @@ class GestorSalas {
             'puntos': _puntos(sala, j),
             'jugoRonda': j.jugoRonda,
             'terminado': j.terminado,
+            'fuera': j.fuera,
+            'zonas': {
+              for (final MapEntry(key: zona, value: ronda) in j.zonas.entries)
+                '$zona': ronda,
+            },
             'segundosGracia': segundosHasta(j.finGracia),
           },
       ],

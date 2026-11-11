@@ -97,6 +97,7 @@ Sin saludo válido en 10 s, o con un token vencido, el servidor responde
   manda con cada cambio: `codigo`, `nivel`, `anfitrion`, `fase`
   (`espera`/`anclas`/`juego`/`terminada`), `ronda`, `dados`, `segundosRonda`,
   `jugadores` (con `conectado`, `listo`, `puntos`, `jugoRonda`, `terminado`,
+  `fuera`, `zonas` —zona completada → ronda en que la completó—,
   `segundosGracia`), `mias` (las casillas propias, para reconstruir el
   tablero) y `resultado` (`ganador`, `motivo`).
 - `sin_sala`, `sala_cerrada`: ya no estás en ninguna sala.
@@ -111,7 +112,7 @@ Sin saludo válido en 10 s, o con un token vencido, el servidor responde
 - **Rondas**: los dos reciben los mismos dados. La siguiente tirada sale
   cuando ambos jugaron o pasaron. Cada ronda dura como máximo 90 s; quien no
   juega, pasa. Quien ya terminó su tablero no frena las rondas.
-- **Desconexión**: el jugador tiene 60 s para volver. Mientras tanto el reloj
+- **Desconexión**: el jugador tiene 10 s para volver. Mientras tanto el reloj
   de la ronda se para y el rival ve la cuenta regresiva. Al volver recibe el
   `estado` completo. Si no vuelve, el rival gana por `abandono`; si los dos se
   caen y nadie vuelve, la partida termina en `abandonoAmbos`. Se mandan pings
@@ -122,7 +123,12 @@ Sin saludo válido en 10 s, o con un token vencido, el servidor responde
   antes que su rival se lleva el primer puntaje y el otro, el segundo; si la
   completan en la misma ronda, los dos se llevan el primero. Los puntos los
   calcula el servidor.
-- **Final**: gana quien tenga más puntos cuando los dos terminan (`puntos`), o
+- **Meta**: la partida se acaba al cerrar la ronda en que alguien llega a la
+  meta de puntos de la tarjeta: 26 con dos jugadores, 24 con tres, 22 con
+  cuatro y 20 con cinco. Una sala admite de 2 a 5.
+  El estado la manda en `metaPuntos`.
+- **Final**: gana quien tenga más puntos cuando los dos terminan o alguien
+  llega a la meta (`puntos`), o
   hay `empate`, o gana el rival de quien se rinde (`rendicion`). La sala
   terminada se borra a los 10 minutos.
 - El servidor valida que el número salió en los dados, que la casilla no

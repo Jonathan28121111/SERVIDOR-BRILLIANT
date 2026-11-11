@@ -216,17 +216,26 @@ void main() {
       });
     });
 
-    test('una sala de dos esta llena para un tercero', () {
+    test('una sala de cinco esta llena para el sexto', () {
       salaConLosDos();
-      final caro = CanalFalso();
-      gestor.conectar('caro', caro);
+      for (final nombre in ['caro', 'dani', 'eva']) {
+        gestor.conectar(nombre, CanalFalso());
+        gestor.recibir(nombre, {
+          'tipo': 'unirse',
+          'codigo': ana.estado['codigo'],
+        });
+      }
+      expect(ana.jugadores, hasLength(5));
+      final gabo = CanalFalso();
+      gestor.conectar('gabo', gabo);
 
-      gestor.recibir('caro', {
+      gestor.recibir('gabo', {
         'tipo': 'unirse',
         'codigo': ana.estado['codigo'],
       });
 
-      expect(caro.ultimoError?['error'], 'sala_llena');
+      expect(gabo.ultimoError?['error'], 'sala_llena');
+      expect(ana.estado['maximoJugadores'], 5);
     });
 
     test('no se puede estar en dos salas', () {
@@ -420,7 +429,7 @@ void main() {
     });
 
     test('quien termino su tablero ya no frena las rondas', () {
-      gestor.recibir('ana', jugada(1, puntos: 30, terminado: true));
+      gestor.recibir('ana', jugada(1, puntos: 20, terminado: true));
       gestor.recibir('beto', jugada(1, puntos: 10));
       expect(beto.estado['ronda'], 2);
 
@@ -494,6 +503,189 @@ void main() {
 
         expect(gestor.cuantasSalas, 0);
       });
+    });
+  });
+
+  group('meta de puntos', () {
+    test('la meta es 26 con dos jugadores y 24 con tres', () {
+      expect(metaDePuntos(2), 26);
+      expect(metaDePuntos(3), 24);
+    });
+
+    test('el estado dice la meta de la sala', () {
+      enJuego();
+
+      expect(ana.estado['metaPuntos'], 26);
+    });
+
+    test('al llegar a la meta se acaba cuando el rival juega su ronda', () {
+      enJuego();
+      gestor.recibir('ana', jugada(1, puntos: 26));
+
+      expect(ana.estado['fase'], 'juego');
+
+      gestor.recibir('beto', jugada(1, puntos: 10));
+
+      expect(ana.estado['fase'], 'terminada');
+      expect(ana.estado['resultado'], {'ganador': 'ana', 'motivo': 'puntos'});
+    });
+
+    test('si los dos llegan en la misma ronda gana quien tiene mas', () {
+      enJuego();
+      gestor.recibir('ana', jugada(1, puntos: 27));
+      gestor.recibir('beto', jugada(1, puntos: 30));
+
+      expect(beto.estado['resultado'], {'ganador': 'beto', 'motivo': 'puntos'});
+    });
+
+    test('por debajo de la meta la partida sigue', () {
+      enJuego();
+      gestor.recibir('ana', jugada(1, puntos: 25));
+      gestor.recibir('beto', jugada(1, puntos: 25));
+
+      expect(ana.estado['fase'], 'juego');
+      expect(ana.estado['ronda'], 2);
+    });
+  });
+
+  group('zonas completadas', () {
+    test('el estado dice en que ronda completo cada quien sus zonas', () {
+      conectarAmbos();
+      gestor.recibir('ana', {
+        'tipo': 'crear_sala',
+        'nivel': 1,
+        'puntos': {
+          '1': [8, 6, 4],
+        },
+      });
+      gestor
+          .recibir('beto', {'tipo': 'unirse', 'codigo': ana.estado['codigo']});
+      gestor.recibir('ana', {'tipo': 'empezar'});
+      gestor.recibir('ana', {'tipo': 'anclas', 'valores': anclasAna});
+      gestor.recibir('beto', {'tipo': 'anclas', 'valores': anclasBeto});
+
+      gestor.recibir('ana', {
+        ...jugada(1),
+        'zonas': [1],
+      });
+      gestor.recibir('beto', jugada(1));
+
+      expect(beto.jugador('ana')['zonas'], {'1': 1});
+      expect(beto.jugador('beto')['zonas'], isEmpty);
+    });
+  });
+
+  group('varios jugadores', () {
+    late CanalFalso caro;
+
+    setUp(() {
+      caro = CanalFalso();
+      gestor.conectar('caro', caro);
+    });
+
+    void enJuegoDeTres() {
+      salaConLosDos();
+      gestor
+          .recibir('caro', {'tipo': 'unirse', 'codigo': ana.estado['codigo']});
+      gestor.recibir('ana', {'tipo': 'empezar'});
+      gestor.recibir('ana', {'tipo': 'anclas', 'valores': anclasAna});
+      gestor.recibir('beto', {'tipo': 'anclas', 'valores': anclasBeto});
+      gestor.recibir('caro', {'tipo': 'anclas', 'valores': anclasBeto});
+    }
+
+    test('la meta es la de la tarjeta: de 26 con dos a 20 con cinco', () {
+      expect([for (var n = 2; n <= 5; n++) metaDePuntos(n)], [26, 24, 22, 20]);
+    });
+
+    test('con tres el juego empieza cuando los tres mandan anclas', () {
+      enJuegoDeTres();
+
+      expect(caro.estado['fase'], 'juego');
+      expect(caro.estado['metaPuntos'], 24);
+    });
+
+    test('la ronda espera a los tres', () {
+      enJuegoDeTres();
+      gestor.recibir('ana', jugada(1));
+      gestor.recibir('beto', jugada(1));
+      expect(ana.estado['ronda'], 1);
+
+      gestor.recibir('caro', jugada(1));
+
+      expect(ana.estado['ronda'], 2);
+    });
+
+    test('con tres la partida acaba al llegar a 24', () {
+      enJuegoDeTres();
+      gestor.recibir('ana', jugada(1, puntos: 10));
+      gestor.recibir('beto', jugada(1, puntos: 24));
+      gestor.recibir('caro', jugada(1, puntos: 20));
+
+      expect(ana.estado['resultado'], {'ganador': 'beto', 'motivo': 'puntos'});
+    });
+
+    test('si empatan los primeros es empate', () {
+      enJuegoDeTres();
+      gestor.recibir('ana', jugada(1, puntos: 25));
+      gestor.recibir('beto', jugada(1, puntos: 25));
+      gestor.recibir('caro', jugada(1, puntos: 3));
+
+      expect(ana.estado['resultado'], {'ganador': null, 'motivo': 'empate'});
+    });
+
+    test('quien se rinde sale y los demas siguen jugando', () {
+      enJuegoDeTres();
+      gestor.recibir('ana', jugada(1));
+      gestor.recibir('beto', jugada(1));
+
+      gestor.recibir('caro', {'tipo': 'rendirse'});
+
+      expect(caro.ultimo['tipo'], 'sala_cerrada');
+      expect(ana.estado['fase'], 'juego');
+      expect(ana.estado['ronda'], 2);
+      expect(ana.jugador('caro')['fuera'], isTrue);
+    });
+
+    test('cuando solo queda uno, gana', () {
+      enJuegoDeTres();
+      gestor.recibir('caro', {'tipo': 'rendirse'});
+      gestor.recibir('beto', {'tipo': 'rendirse'});
+
+      expect(ana.estado['resultado'], {
+        'ganador': 'ana',
+        'motivo': 'rendicion',
+      });
+      expect(beto.estado['resultado'], {
+        'ganador': 'ana',
+        'motivo': 'rendicion',
+      });
+    });
+
+    test('quien no vuelve a tiempo sale y los demas siguen', () {
+      fakeAsync((tiempo) {
+        enJuegoDeTres();
+        gestor.desconectar('caro', caro);
+        tiempo.elapse(const Duration(seconds: 61));
+
+        expect(ana.estado['fase'], 'juego');
+        expect(ana.jugador('caro')['fuera'], isTrue);
+
+        final nuevo = CanalFalso();
+        gestor.conectar('caro', nuevo);
+        expect(nuevo.ultimo['tipo'], 'sin_sala');
+      });
+    });
+
+    test('quien se rinde puede crear otra sala', () {
+      gestor = GestorSalas(ajustes: ajustes, azar: Random(7));
+      gestor.conectar('caro', caro);
+      enJuegoDeTres();
+      gestor.recibir('caro', {'tipo': 'rendirse'});
+
+      gestor.recibir('caro', {'tipo': 'crear_sala', 'nivel': 1});
+
+      expect(caro.estado['fase'], 'espera');
+      expect(caro.estado['anfitrion'], 'caro');
     });
   });
 
