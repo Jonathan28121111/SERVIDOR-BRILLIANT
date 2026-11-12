@@ -55,6 +55,9 @@ class _Jugador {
   final String usuario;
   Canal? canal;
   bool listo = false;
+
+  /// Dio "Listo" en la sala de espera.
+  bool preparado = false;
   bool jugoRonda = false;
   bool terminado = false;
 
@@ -99,6 +102,9 @@ class _Sala {
 
   /// Se fija al empezar, con los jugadores que había.
   int? meta;
+
+  /// Lo elige el anfitrión antes de empezar.
+  bool conReloj = true;
 
   /// Zona -> sus puntajes en orden de llegada, p. ej. [8, 6, 4]: quien la
   /// completa primero se lleva 8 y quien la completa después, 6.
@@ -250,6 +256,10 @@ class GestorSalas {
           _unirse(usuario, mensaje['codigo']);
         case 'salir_sala':
           _salirSala(usuario);
+        case 'ajustes':
+          _ajustes(usuario, mensaje);
+        case 'preparado':
+          _preparado(usuario, mensaje['valor']);
         case 'empezar':
           _empezar(usuario);
         case 'anclas':
@@ -358,6 +368,39 @@ class GestorSalas {
     _canales[usuario.toLowerCase()]?.enviar({'tipo': 'sin_sala'});
   }
 
+  void _ajustes(String usuario, Map<String, Object?> mensaje) {
+    final sala = _salaPropia(usuario);
+    if (!_mismo(sala.anfitrion, usuario)) {
+      throw const ErrorSala(
+        'no_eres_anfitrion',
+        'Solo quien creó la sala cambia las opciones.',
+      );
+    }
+    if (sala.fase != Fase.espera) {
+      throw const ErrorSala('partida_empezada', 'La partida ya empezó.');
+    }
+    final conReloj = mensaje['conReloj'];
+    if (conReloj is! bool) {
+      throw const ErrorSala('ajustes_invalidos', 'Esa opción no es válida.');
+    }
+    if (conReloj != sala.conReloj) {
+      sala.conReloj = conReloj;
+      for (final j in sala.jugadores) {
+        if (!_mismo(j.usuario, sala.anfitrion)) j.preparado = false;
+      }
+    }
+    _difundir(sala);
+  }
+
+  void _preparado(String usuario, Object? valor) {
+    final sala = _salaPropia(usuario);
+    if (sala.fase != Fase.espera) {
+      throw const ErrorSala('partida_empezada', 'La partida ya empezó.');
+    }
+    sala.jugador(usuario)!.preparado = valor != false;
+    _difundir(sala);
+  }
+
   void _empezar(String usuario) {
     final sala = _salaPropia(usuario);
     if (!_mismo(sala.anfitrion, usuario)) {
@@ -371,6 +414,17 @@ class GestorSalas {
     }
     if (sala.jugadores.length < minimoJugadores) {
       throw const ErrorSala('falta_rival', 'Todavía falta tu rival.');
+    }
+    final faltan = sala.jugadores
+        .where((j) => !_mismo(j.usuario, sala.anfitrion) && !j.preparado)
+        .length;
+    if (faltan > 0) {
+      throw ErrorSala(
+        'faltan_listos',
+        faltan == 1
+            ? 'Falta un jugador por dar Listo.'
+            : 'Faltan $faltan jugadores por dar Listo.',
+      );
     }
     sala.meta = metaDePuntos(sala.jugadores.length);
     sala.fase = Fase.anclas;
@@ -541,7 +595,7 @@ class GestorSalas {
   /// se para, y vuelve a empezar completo cuando regresa.
   void _ajustarReloj(_Sala sala) {
     final todos = sala.activos.every((j) => j.conectado);
-    if (sala.fase != Fase.juego || !todos) {
+    if (sala.fase != Fase.juego || !todos || !sala.conReloj) {
       sala.reloj?.cancel();
       sala.reloj = null;
       sala.finRonda = null;
@@ -806,6 +860,7 @@ class GestorSalas {
         null => null,
       },
       'segundosRonda': segundosHasta(sala.finRonda),
+      'conReloj': sala.conReloj,
       'metaPuntos': sala.metaPuntos,
       'maximoJugadores': maximoJugadores,
       'jugadores': [
@@ -814,6 +869,7 @@ class GestorSalas {
             'usuario': j.usuario,
             'conectado': j.conectado,
             'listo': j.listo,
+            'preparado': j.preparado || _mismo(j.usuario, sala.anfitrion),
             'puntos': _puntos(sala, j),
             'jugoRonda': j.jugoRonda,
             'terminado': j.terminado,

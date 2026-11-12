@@ -70,6 +70,13 @@ void main() {
     beto = CanalFalso();
   });
 
+  void empezar() {
+    for (final nombre in ['beto', 'caro', 'dani', 'eva']) {
+      gestor.recibir(nombre, {'tipo': 'preparado'});
+    }
+    gestor.recibir('ana', {'tipo': 'empezar'});
+  }
+
   void conectarAmbos() {
     gestor.conectar('ana', ana);
     gestor.conectar('beto', beto);
@@ -88,7 +95,7 @@ void main() {
 
   void enJuego() {
     salaConLosDos();
-    gestor.recibir('ana', {'tipo': 'empezar'});
+    empezar();
     gestor.recibir('ana', {'tipo': 'anclas', 'valores': anclasAna});
     gestor.recibir('beto', {'tipo': 'anclas', 'valores': anclasBeto});
   }
@@ -251,7 +258,7 @@ void main() {
     test('solo el anfitrion empieza y solo con rival', () {
       gestor.conectar('ana', ana);
       crearSala();
-      gestor.recibir('ana', {'tipo': 'empezar'});
+      empezar();
       expect(ana.ultimoError?['error'], 'falta_rival');
 
       gestor.conectar('beto', beto);
@@ -262,7 +269,7 @@ void main() {
       gestor.recibir('beto', {'tipo': 'empezar'});
       expect(beto.ultimoError?['error'], 'no_eres_anfitrion');
 
-      gestor.recibir('ana', {'tipo': 'empezar'});
+      empezar();
       expect(ana.estado['fase'], 'anclas');
       expect(beto.estado['fase'], 'anclas');
     });
@@ -305,7 +312,7 @@ void main() {
   group('anclas', () {
     setUp(() {
       salaConLosDos();
-      gestor.recibir('ana', {'tipo': 'empezar'});
+      empezar();
     });
 
     test('el juego empieza cuando los dos mandan sus anclas', () {
@@ -472,7 +479,7 @@ void main() {
       ana = CanalFalso();
       beto = CanalFalso();
       salaConLosDos();
-      gestor.recibir('ana', {'tipo': 'empezar'});
+      empezar();
 
       gestor.recibir('ana', {'tipo': 'rendirse'});
 
@@ -502,6 +509,66 @@ void main() {
         tiempo.elapse(const Duration(minutes: 11));
 
         expect(gestor.cuantasSalas, 0);
+      });
+    });
+  });
+
+  group('listos y opciones', () {
+    test('no se empieza hasta que todos dan Listo', () {
+      salaConLosDos();
+      expect(ana.jugador('beto')['preparado'], isFalse);
+      expect(ana.jugador('ana')['preparado'], isTrue);
+
+      gestor.recibir('ana', {'tipo': 'empezar'});
+      expect(ana.ultimoError?['error'], 'faltan_listos');
+      expect(ana.estado['fase'], 'espera');
+
+      gestor.recibir('beto', {'tipo': 'preparado'});
+      expect(ana.jugador('beto')['preparado'], isTrue);
+      gestor.recibir('ana', {'tipo': 'empezar'});
+
+      expect(ana.estado['fase'], 'anclas');
+    });
+
+    test('se puede quitar el Listo', () {
+      salaConLosDos();
+      gestor.recibir('beto', {'tipo': 'preparado'});
+      gestor.recibir('beto', {'tipo': 'preparado', 'valor': false});
+
+      expect(ana.jugador('beto')['preparado'], isFalse);
+    });
+
+    test('la sala empieza con reloj', () {
+      salaConLosDos();
+
+      expect(ana.estado['conReloj'], isTrue);
+    });
+
+    test('solo el anfitrion cambia el reloj y eso quita los Listo', () {
+      salaConLosDos();
+      gestor.recibir('beto', {'tipo': 'preparado'});
+
+      gestor.recibir('beto', {'tipo': 'ajustes', 'conReloj': false});
+      expect(beto.ultimoError?['error'], 'no_eres_anfitrion');
+
+      gestor.recibir('ana', {'tipo': 'ajustes', 'conReloj': false});
+      expect(beto.estado['conReloj'], isFalse);
+      expect(beto.jugador('beto')['preparado'], isFalse);
+    });
+
+    test('sin reloj la ronda espera a quien no ha jugado', () {
+      fakeAsync((tiempo) {
+        salaConLosDos();
+        gestor.recibir('ana', {'tipo': 'ajustes', 'conReloj': false});
+        empezar();
+        gestor.recibir('ana', {'tipo': 'anclas', 'valores': anclasAna});
+        gestor.recibir('beto', {'tipo': 'anclas', 'valores': anclasBeto});
+        expect(ana.estado['segundosRonda'], isNull);
+
+        gestor.recibir('ana', jugada(1));
+        tiempo.elapse(const Duration(minutes: 10));
+
+        expect(ana.estado['ronda'], 1);
       });
     });
   });
@@ -560,7 +627,7 @@ void main() {
       });
       gestor
           .recibir('beto', {'tipo': 'unirse', 'codigo': ana.estado['codigo']});
-      gestor.recibir('ana', {'tipo': 'empezar'});
+      empezar();
       gestor.recibir('ana', {'tipo': 'anclas', 'valores': anclasAna});
       gestor.recibir('beto', {'tipo': 'anclas', 'valores': anclasBeto});
 
@@ -587,7 +654,7 @@ void main() {
       salaConLosDos();
       gestor
           .recibir('caro', {'tipo': 'unirse', 'codigo': ana.estado['codigo']});
-      gestor.recibir('ana', {'tipo': 'empezar'});
+      empezar();
       gestor.recibir('ana', {'tipo': 'anclas', 'valores': anclasAna});
       gestor.recibir('beto', {'tipo': 'anclas', 'valores': anclasBeto});
       gestor.recibir('caro', {'tipo': 'anclas', 'valores': anclasBeto});
@@ -850,7 +917,7 @@ void main() {
         'tipo': 'unirse',
         'codigo': ana.estado['codigo'],
       });
-      gestor.recibir('ana', {'tipo': 'empezar'});
+      empezar();
       gestor.recibir('ana', {'tipo': 'anclas', 'valores': anclasAna});
       gestor.recibir('beto', {'tipo': 'anclas', 'valores': anclasBeto});
     }
@@ -899,7 +966,7 @@ void main() {
         'tipo': 'unirse',
         'codigo': ana.estado['codigo'],
       });
-      gestor.recibir('ana', {'tipo': 'empezar'});
+      empezar();
       gestor.recibir('ana', {
         'tipo': 'anclas',
         'valores': anclasAna,

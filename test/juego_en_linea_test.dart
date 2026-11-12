@@ -139,6 +139,9 @@ void main() {
     final sala = await beto.esperar('estado');
     expect((sala['jugadores'] as List).length, 2);
 
+    beto.mandar({'tipo': 'preparado'});
+    await ana.esperar('estado');
+    await beto.esperar('estado');
     ana.mandar({'tipo': 'empezar'});
     expect((await beto.esperar('estado'))['fase'], 'anclas');
 
@@ -178,6 +181,8 @@ void main() {
     ana.mandar({'tipo': 'crear_sala', 'nivel': 1});
     final codigo = (await ana.esperar('estado'))['codigo'];
     beto.mandar({'tipo': 'unirse', 'codigo': codigo});
+    await ana.esperar('estado');
+    beto.mandar({'tipo': 'preparado'});
     await ana.esperar('estado');
     ana.mandar({'tipo': 'empezar'});
     await ana.esperar('estado');
