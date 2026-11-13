@@ -874,6 +874,10 @@ class GestorSalas {
             'jugoRonda': j.jugoRonda,
             'terminado': j.terminado,
             'fuera': j.fuera,
+            'casillas': [
+              for (final MapEntry(key: (f, c), value: n) in j.casillas.entries)
+                [f, c, n],
+            ],
             'zonas': {
               for (final MapEntry(key: zona, value: ronda) in j.zonas.entries)
                 '$zona': ronda,
