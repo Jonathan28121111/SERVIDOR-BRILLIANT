@@ -615,6 +615,17 @@ void main() {
     });
   });
 
+  group('ver el tablero del rival', () {
+    test('cada quien recibe las casillas de los demas', () {
+      enJuego();
+      gestor.recibir('beto', jugada(1, fila: 4, columna: 4));
+
+      expect(ana.jugador('beto')['casillas'], contains(equals([4, 4, 3])));
+      expect(ana.jugador('beto')['casillas'], contains(equals([0, 0, 3])));
+      expect(ana.jugador('ana')['casillas'], contains(equals([0, 0, 1])));
+    });
+  });
+
   group('zonas completadas', () {
     test('el estado dice en que ronda completo cada quien sus zonas', () {
       conectarAmbos();
