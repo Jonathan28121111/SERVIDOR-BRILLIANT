@@ -13,6 +13,7 @@ Future<void> main(List<String> argumentos) async {
       await io.serve(api.manejador, InternetAddress.anyIPv4, puerto);
 
   stdout.writeln('Servidor de cuentas en http://localhost:${servidor.port}');
+  stdout.writeln('Partidas en linea en ws://localhost:${servidor.port}/juego');
   stdout.writeln('Usuarios guardados en $datos');
 
   var cerrando = false;

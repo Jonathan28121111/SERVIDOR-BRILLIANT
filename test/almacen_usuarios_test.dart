@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:servidor_brilliant/almacen_usuarios.dart';
 import 'package:test/test.dart';
 
@@ -109,7 +111,32 @@ void main() {
       almacen.registrar('jonathan', 'contrasena123');
       almacen.borrar('jonathan');
 
-      expect(almacen.registrar('jonathan', 'otra-contrasena').salioBien, isTrue);
+      expect(
+          almacen.registrar('jonathan', 'otra-contrasena').salioBien, isTrue);
+    });
+  });
+
+  group('en disco', () {
+    late Directory carpeta;
+
+    setUp(() => carpeta = Directory.systemTemp.createTempSync('almacen_'));
+    tearDown(() => carpeta.deleteSync(recursive: true));
+
+    test('las cuentas sobreviven a un reinicio', () {
+      final ruta = '${carpeta.path}/usuarios.json';
+      AlmacenUsuarios(ruta).registrar('jonathan', 'contrasena123');
+
+      final otraVez = AlmacenUsuarios(ruta);
+
+      expect(otraVez.existe('jonathan'), isTrue);
+      expect(otraVez.autenticar('jonathan', 'contrasena123').salioBien, isTrue);
+    });
+
+    test('no deja el archivo temporal tirado', () {
+      final ruta = '${carpeta.path}/usuarios.json';
+      AlmacenUsuarios(ruta).registrar('jonathan', 'contrasena123');
+
+      expect(File('$ruta.tmp').existsSync(), isFalse);
     });
   });
 }
